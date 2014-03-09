@@ -18,6 +18,9 @@ from pysms import Sms, prepare_number
 from pysms import SmsException, CommunicationException, AuthException, \
                   SendException, ResponseException
 
+from pyvirtualdisplay import Display
+from selenium import webdriver
+
 class NajdiSiSms(Sms):
     """
     Send free sms-es using `www.najdi.si <http://www.najdi.si/>`_ service
@@ -72,12 +75,23 @@ class NajdiSiSms(Sms):
         """
 
         self.__dict__.update(self.InitSchema().deserialize(locals()))
+        
 
-        self.br = mechanize.Browser()
-        self.br.set_handle_robots(False)
+        self.display = Display(visible=0, size=(800, 600))
+        self.display.start()
+
+        #self.br = mechanize.Browser()
+        #self.br.set_handle_robots(False)
+        self.browser = webdriver.Firefox()
+        
 
         self._session = None
         self._balance = 0
+
+    def destruct(self):
+        self.browser.quit()
+        self.display.stop()
+        return
 
     def _parse_balance(self, resp):
         match = re.search('<strong id="sms_left" name="sms_left">\s?(\d+)\s?/\s?(\d+)\s?</strong>',
@@ -101,7 +115,7 @@ class NajdiSiSms(Sms):
 
         return self._balance
 
-    def _login(self):
+    def _login_ex(self):
         # We have to log out first to provide consistency,
         # najdi.si has some wierd bugs
         try:
@@ -134,8 +148,16 @@ class NajdiSiSms(Sms):
 
         self._balance = self._parse_balance(resp.get_data())
         self._session = match.group(1)
-
-    def _send_sms( self, session, prefix, number, data ):
+    def _login(self):
+        self.browser.get('http://www.najdi.si/prijava')
+        login_form = self.browser.find_element_by_id("jsecLoginForm")
+        username = self.browser.find_element_by_name("jsecLogin")
+        username.send_keys(self.username)
+        password = self.browser.find_element_by_name("jsecPassword")
+        password.send_keys(self.password)
+        login_form.submit()
+        
+    def _send_sms_ex( self, session, prefix, number, data ):
         quoted = urllib.quote(data) if six.PY3 else urllib.quote(data.encode("utf-8"))
         url = self.send_url.format(session = session,
                                    prefix = prefix,
@@ -156,6 +178,18 @@ class NajdiSiSms(Sms):
 
         self._balance = int(data["msg_left"])
 
+    def _send_sms( self, session, prefix, number, data ):
+        self.browser.get('http://www.najdi.si/najdi/sms')
+        smsform = self.browser.find_element_by_id("smsForm")
+        areaCode = self.browser.find_element_by_id("areaCodeRecipient")
+        areaCode.send_keys("0"+prefix)
+        tel = self.browser.find_element_by_id("phoneNumberRecipient")
+        tel.send_keys(number)
+        text = self.browser.find_element_by_id("text")
+        text.send_keys(data[:155])
+        smsform.submit()
+        d = self.browser.page_source # parse Danes lahko pošljete še <strong>32</strong> sporočil.
+
     def send(self, number, text):
         """
         Sends sms
@@ -165,13 +199,6 @@ class NajdiSiSms(Sms):
         :param text: Text you want to send
         :type text: str
 
-        :returns: Balance
-        :rtype: int
-        :raises: :py:exc:`pysms.sms.AuthException`,
-                 :py:exc:`pysms.sms.SendException`,
-                 :py:exc:`pysms.sms.InputException`,
-                 :py:exc:`pysms.sms.CommunicationException`,
-                 :py:exc:`pysms.sms.ResponseException`
         """
 
         options = self.SendSchema().deserialize(locals())
@@ -179,31 +206,9 @@ class NajdiSiSms(Sms):
         text = options["text"]
 
         self.logger.info("Sms with number %s and text %s", number, text)
-
-        last_exception = None
-        for x in range(0, self.retries + 1):
-            self.logger.info("Send retry %d", x)
-
-            try:
-                if not self._session:
-                    self.logger.debug("We are not yet logged in")
-                    self._login()
-                    self.logger.info("Login complete")
-
-                    if not self._balance:
-                        self.logger.info("Out of balance")
-                        raise SendException("Out of balance")
-
-                self.logger.info("Sending sms")
-                self._send_sms(self._session, number[4:6], number[6:], text )
-            except SmsException as e:
-                last_exception = e
-                self._session = None
-            else:
-                last_exception = None
-                break
-
-        if last_exception: raise last_exception
-
+        self._login()
+        self.logger.info("Sending sms")
+        self._send_sms(self._session, number[4:6], number[6:], text )
+        
         self.logger.info("Sms sent")
         return self._balance

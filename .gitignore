@@ -5,6 +5,9 @@ include
 lib
 local
 
+#me
+simple.py
+
 # python
 *.egg-info
 *.egg
