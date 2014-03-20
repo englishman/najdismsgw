@@ -182,7 +182,9 @@ class NajdiSiSms(Sms):
         self.browser.get('http://www.najdi.si/najdi/sms')
         smsform = self.browser.find_element_by_id("smsForm")
         areaCode = self.browser.find_element_by_id("areaCodeRecipient")
-        areaCode.send_keys("0"+prefix)
+        ops = [ o for o in areaCode.find_elements_by_tag_name('option') if o.text == "0"+prefix]
+        #areaCode.send_keys("0"+prefix)
+        ops[0].click()
         tel = self.browser.find_element_by_id("phoneNumberRecipient")
         tel.send_keys(number)
         text = self.browser.find_element_by_id("text")
